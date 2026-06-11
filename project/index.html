@@ -1,0 +1,383 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>문서 비교기 (kordoc MCP 연동)</title>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <style>
+    body { font-family: "Malgun Gothic", sans-serif; margin: 0; background: #f6f8fb; color: #1f2937; }
+    .wrap { max-width: 1280px; margin: 0 auto; padding: 20px; }
+    .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
+    label { font-size: 13px; font-weight: bold; display: block; margin-bottom: 4px; }
+    input[type="file"] { width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 8px; box-sizing: border-box; }
+    button { border: 0; border-radius: 8px; padding: 9px 12px; font-weight: 700; cursor: pointer; }
+    #analyzeBtn { background: #2563eb; color: #fff; }
+    #analyzeAIBtn { background: #7c3aed; color: #fff; }
+    #excelBtn { background: #059669; color: #fff; }
+    #excelBtn:disabled { background: #94a3b8; cursor: not-allowed; }
+    .log { max-height: 160px; overflow: auto; background: #0b1220; color: #d1fae5; font-size: 12px; border-radius: 8px; padding: 8px; white-space: pre-wrap; }
+    .hint { font-size: 12px; color: #6b7280; margin-top: 8px; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th, td { border: 1px solid #e5e7eb; padding: 8px; vertical-align: top; }
+    thead { background: #f3f4f6; }
+    .changed { background: #fff7ed; }
+    .empty { text-align:center;color:#6b7280; }
+    .diff-filled { background: #fee2e2; font-weight: 700; }
+    .pagination { display:flex; gap:8px; align-items:center; justify-content:flex-end; margin-top:10px; }
+    .pagination button { background:#1f2937; color:#fff; padding:6px 10px; font-size:12px; }
+    .pagination button:disabled { background:#94a3b8; cursor:not-allowed; }
+    .page-info { font-size:12px; color:#374151; min-width:140px; text-align:right; }
+    #pageJumpInput { width:72px; padding:6px; border:1px solid #d1d5db; border-radius:6px; font-size:12px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h2>문서 비교기 (kordoc MCP 연동)</h2>
+
+    <section class="card">
+      <div class="grid">
+        <div>
+          <label for="targetFile">수정대상 파일 (HWPX/PDF 1개)</label>
+          <input id="targetFile" type="file" />
+        </div>
+        <div>
+          <label for="compareFiles">비교대상 파일 (HWPX/PDF 다중)</label>
+          <input id="compareFiles" type="file" multiple />
+        </div>
+      </div>
+
+      <div class="grid" style="margin-top:10px;">
+        <div>
+          <label for="apiKey">OpenRouter API Key (선택: 입력 시 .env보다 우선)</label>
+          <input id="apiKey" type="password" placeholder="sk-or-v1-..." />
+        </div>
+        <div>
+          <label for="modelId">모델 ID</label>
+          <input id="modelId" type="text" value="openai/gpt-5.3-chat" />
+        </div>
+      </div>
+
+      <div class="row">
+        <button id="saveKeyBtn" type="button">API 키 저장</button>
+        <button id="clearKeyBtn" type="button">API 키 삭제</button>
+        <button id="analyzeBtn" type="button">[Kordoc파싱_AI분석] 실행</button>
+        <button id="analyzeAIBtn" type="button">[AI분석] 실행</button>
+        <button id="excelBtn" type="button" disabled>엑셀 다운로드</button>
+      </div>
+
+      <p class="hint">※ [Kordoc파싱_AI분석]: kordoc MCP로 .md 변환 후 AI 분석 / [AI분석]: kordoc 없이 PDF 텍스트 직접 추출 후 AI 분석</p>
+      <div id="progress" class="log">대기 중...</div>
+    </section>
+
+    <section class="card">
+      <h3>결과</h3>
+      <p id="totalInfo" class="hint" style="margin-top:0; margin-bottom:8px;">TOT: 0건</p>
+      <table>
+        <thead>
+          <tr>
+            <th>서비스명</th><th>변경항목</th><th>기존내용</th><th>변경내용</th><th>변경사유</th>
+          </tr>
+        </thead>
+        <tbody id="resultBody">
+          <tr><td colspan="5" class="empty">아직 결과가 없습니다.</td></tr>
+        </tbody>
+      </table>
+      <div class="pagination">
+        <button id="prevPageBtn" type="button" disabled>이전</button>
+        <button id="nextPageBtn" type="button" disabled>다음</button>
+        <input id="pageJumpInput" type="number" min="1" placeholder="페이지" />
+        <button id="jumpPageBtn" type="button" disabled>이동</button>
+        <span id="pageInfo" class="page-info">0 / 0</span>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    // file:// 로 직접 열었을 때 CORS가 발생하므로 서버 주소로 유도
+    if (window.location.protocol === 'file:') {
+      alert('이 페이지는 file:// 직접 실행이 아니라 http://localhost:3000 으로 접속해야 합니다.\n자동으로 이동합니다.');
+      window.location.href = 'http://localhost:3000';
+    }
+
+    const progressEl = document.getElementById('progress');
+    const resultBody = document.getElementById('resultBody');
+    const excelBtn = document.getElementById('excelBtn');
+    const analyzeBtn = document.getElementById('analyzeBtn');
+    const analyzeAIBtn = document.getElementById('analyzeAIBtn');
+    const targetFileEl = document.getElementById('targetFile');
+    const compareFilesEl = document.getElementById('compareFiles');
+    const apiKeyEl = document.getElementById('apiKey');
+    const modelIdEl = document.getElementById('modelId');
+    const prevPageBtn = document.getElementById('prevPageBtn');
+    const nextPageBtn = document.getElementById('nextPageBtn');
+    const pageJumpInput = document.getElementById('pageJumpInput');
+    const jumpPageBtn = document.getElementById('jumpPageBtn');
+    const pageInfoEl = document.getElementById('pageInfo');
+    const totalInfoEl = document.getElementById('totalInfo');
+
+    const STORAGE_KEY = 'openrouter_api_key';
+
+    let currentResults = [];
+    const PAGE_SIZE = 20;
+    let currentPage = 1;
+
+    function log(msg) {
+      const t = new Date().toISOString().replace('T', ' ').slice(0, 19);
+      progressEl.textContent += `\n[${t}] ${msg}`;
+      progressEl.scrollTop = progressEl.scrollHeight;
+    }
+
+    // API 키 로컬 저장/복원
+    apiKeyEl.value = localStorage.getItem(STORAGE_KEY) || '';
+    document.getElementById('saveKeyBtn').addEventListener('click', () => {
+      localStorage.setItem(STORAGE_KEY, apiKeyEl.value.trim());
+      log('API 키 저장 완료 (브라우저 localStorage)');
+    });
+    document.getElementById('clearKeyBtn').addEventListener('click', () => {
+      localStorage.removeItem(STORAGE_KEY);
+      apiKeyEl.value = '';
+      log('API 키 삭제 완료');
+    });
+
+    function cleanText(v) {
+      return String(v || '').trim();
+    }
+
+    function isMeaningfulRow(r) {
+      const keys = ['서비스명','변경항목','기존내용','변경내용','변경사유'];
+      return keys.some(k => cleanText(r?.[k]).length > 0);
+    }
+
+    function normalizeResults(out) {
+      let rows = [];
+      if (out?.analysis?.results && Array.isArray(out.analysis.results)) rows = out.analysis.results;
+      else if (out?.results && Array.isArray(out.results)) rows = out.results;
+      return rows.filter(isMeaningfulRow);
+    }
+
+    function normalizeTargetRows(out) {
+      const rows = Array.isArray(out?.targetBusinessRows) ? out.targetBusinessRows : [];
+      return rows.filter(isMeaningfulRow);
+    }
+
+    function extractRowsFromTargetMarkdown(markdown) {
+      const lines = String(markdown || '').split(/\r?\n/);
+      const rows = [];
+      const generic = new Set(['생활에 어려움을','겪고 계신가요?','생계를 유지하기가 힘들 때','생활에 갑작스러운 위기가 닥쳤을 때','주택문제로 어려움을 겪을 때','재정적인 도움이 필요할 때','일상의 불편함, 부족함을 해소하고 싶을 때','생계 지원']);
+
+      let current = null;
+      let section = '';
+      let page = '';
+
+      function flush() {
+        if (current && isMeaningfulRow(current) && cleanText(current.사업명)) rows.push(current);
+        current = null;
+        section = '';
+      }
+
+      function isBizTitle(title) {
+        if (!title || generic.has(title)) return false;
+        if (title.length > 60) return false;
+        return /(지원|급여|제도|사업|바우처|서비스|보장|수당|대출|바처)/.test(title);
+      }
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (!line) continue;
+
+        const p = line.match(/^##\s*\[pages\s+([^\]]+)\]/i);
+        if (p) { page = cleanText(p[1]); continue; }
+
+        const h1 = line.match(/^#\s+(.+)$/);
+        if (h1) {
+          const title = cleanText(h1[1]);
+          if (isBizTitle(title)) {
+            flush();
+            current = {
+              페이지번호: page,
+              사업명: title,
+              대상: '',
+              내용: '',
+              방법: '',
+              문의: '',
+              대상수정내용: '',
+              내용수정내용: '',
+              방법수정내용: '',
+              문의수정내용: '',
+              사업담당자: ''
+            };
+          }
+          continue;
+        }
+
+        const h2 = line.match(/^##\s*(대상|내용|방법|문의)\s*$/);
+        if (h2 && current) { section = h2[1]; continue; }
+
+        if (current && section && !/^#/.test(line)) {
+          const prev = cleanText(current[section]);
+          current[section] = prev ? `${prev} ${line.replace(/^[-•]\s*/, '')}` : line.replace(/^[-•]\s*/, '');
+        }
+      }
+
+      flush();
+      const dedup = [];
+      const seen = new Set();
+      for (const r of rows) {
+        const k = `${cleanText(r.사업명)}__${cleanText(r.페이지번호)}`;
+        if (!cleanText(r.사업명) || seen.has(k)) continue;
+        seen.add(k);
+        dedup.push(r);
+      }
+      return dedup;
+    }
+
+    function renderPage(results, page) {
+      resultBody.innerHTML = '';
+      if (!Array.isArray(results) || results.length === 0) {
+        resultBody.innerHTML = '<tr><td colspan="5" class="empty">수정목록 결과가 없습니다.</td></tr>';
+        totalInfoEl.textContent = 'TOT: 0건';
+        pageInfoEl.textContent = '0 / 0';
+        prevPageBtn.disabled = true;
+        nextPageBtn.disabled = true;
+        jumpPageBtn.disabled = true;
+        pageJumpInput.value = '';
+        pageJumpInput.max = '1';
+        return;
+      }
+
+      const totalPages = Math.max(1, Math.ceil(results.length / PAGE_SIZE));
+      const safePage = Math.min(Math.max(1, page), totalPages);
+      const start = (safePage - 1) * PAGE_SIZE;
+      const sliced = results.slice(start, start + PAGE_SIZE);
+
+      for (const r of sliced) {
+        const tr = document.createElement('tr');
+        const d1 = cleanText(r.변경내용);
+        tr.innerHTML = `
+          <td>${r.서비스명 || ''}</td>
+          <td>${r.변경항목 || ''}</td>
+          <td>${r.기존내용 || ''}</td>
+          <td class="changed ${d1 ? 'diff-filled' : ''}">${r.변경내용 || ''}</td>
+          <td>${r.변경사유 || ''}</td>
+        `;
+        resultBody.appendChild(tr);
+      }
+
+      currentPage = safePage;
+      totalInfoEl.textContent = `TOT: ${results.length}건`;
+      pageInfoEl.textContent = `${currentPage} / ${totalPages} (총 ${results.length}행)`;
+      prevPageBtn.disabled = currentPage <= 1;
+      nextPageBtn.disabled = currentPage >= totalPages;
+      jumpPageBtn.disabled = totalPages <= 1;
+      pageJumpInput.max = String(totalPages);
+    }
+
+    async function runAnalysis(analysisMode) {
+      try {
+        const targetFile = targetFileEl.files[0];
+        const compareFiles = Array.from(compareFilesEl.files || []);
+        if (!targetFile || compareFiles.length === 0) {
+          throw new Error('수정대상 1개와 비교대상 1개 이상을 선택하세요.');
+        }
+
+        const formData = new FormData();
+        formData.append('targetFile', targetFile);
+        compareFiles.forEach(f => formData.append('compareFiles', f));
+        formData.append('apiKey', apiKeyEl.value.trim());
+        formData.append('modelId', modelIdEl.value.trim());
+        formData.append('analysisMode', analysisMode);
+
+        analyzeBtn.disabled = true;
+        analyzeAIBtn.disabled = true;
+        excelBtn.disabled = true;
+
+        log(analysisMode === 'kordoc_ai'
+          ? '서버에 업로드 및 kordoc 파싱 + AI 분석 요청 중...'
+          : '서버에 업로드 및 PDF 직접 추출 + AI 분석 요청 중...');
+        const response = await fetch('/api/analyze', { method: 'POST', body: formData });
+        if (!response.ok) {
+          const err = await response.json().catch(() => ({}));
+          throw new Error(err?.message || `요청 실패 (${response.status})`);
+        }
+        const out = await response.json();
+        if (!out.success) throw new Error(out.message || '분석 실패');
+
+        const resultRows = normalizeResults(out.data);
+        const targetRows = normalizeTargetRows(out.data);
+        const markdownRows = extractRowsFromTargetMarkdown(out?.data?.targetMarkdown || '');
+
+        // 표시 우선순위:
+        // 1) AI가 채운 최종 결과(수정내용 컬럼 포함)
+        // 2) 파싱된 target 사업목록
+        // 3) targetMarkdown에서 클라이언트 추출한 목록
+        currentResults = resultRows.length > 0 ? resultRows : targetRows;
+        if (currentResults.length === 0 && markdownRows.length > 0) {
+          currentResults = markdownRows;
+        }
+        currentPage = 1;
+        renderPage(currentResults, currentPage);
+        excelBtn.disabled = currentResults.length === 0;
+        log('완료: project 폴더에 target_parsed.md / compare_parsed*.md / parsed_text.json / analysis_result.json / 수정목록.xlsx 저장됨');
+      } catch (e) {
+        log(`오류: ${e.message}`);
+      } finally {
+        analyzeBtn.disabled = false;
+        analyzeAIBtn.disabled = false;
+      }
+    }
+
+    analyzeBtn.addEventListener('click', () => runAnalysis('kordoc_ai'));
+    analyzeAIBtn.addEventListener('click', () => runAnalysis('ai_direct'));
+
+    excelBtn.addEventListener('click', () => {
+      const wb = XLSX.utils.book_new();
+      const wsData = [["서비스명","변경항목","기존내용","변경내용","변경사유"]];
+      currentResults.forEach(r => wsData.push([
+        r.서비스명 || '', r.변경항목 || '', r.기존내용 || '', r.변경내용 || '', r.변경사유 || ''
+      ]));
+      const ws = XLSX.utils.aoa_to_sheet(wsData);
+      XLSX.utils.book_append_sheet(wb, ws, '신구대조표');
+      XLSX.writeFile(wb, '수정목록_신구대조표.xlsx');
+      log('엑셀 다운로드 완료');
+    });
+
+    prevPageBtn.addEventListener('click', () => {
+      if (currentPage > 1) {
+        currentPage -= 1;
+        renderPage(currentResults, currentPage);
+      }
+    });
+
+    nextPageBtn.addEventListener('click', () => {
+      const totalPages = Math.max(1, Math.ceil(currentResults.length / PAGE_SIZE));
+      if (currentPage < totalPages) {
+        currentPage += 1;
+        renderPage(currentResults, currentPage);
+      }
+    });
+
+    function jumpToPage() {
+      const totalPages = Math.max(1, Math.ceil(currentResults.length / PAGE_SIZE));
+      const requested = Number(pageJumpInput.value);
+      if (!Number.isInteger(requested)) {
+        log('페이지 번호를 숫자로 입력하세요.');
+        return;
+      }
+      if (requested < 1 || requested > totalPages) {
+        log(`페이지 범위를 확인하세요. (1 ~ ${totalPages})`);
+        return;
+      }
+      currentPage = requested;
+      renderPage(currentResults, currentPage);
+    }
+
+    jumpPageBtn.addEventListener('click', jumpToPage);
+    pageJumpInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') jumpToPage();
+    });
+  </script>
+</body>
+</html>

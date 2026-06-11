@@ -1,0 +1,40 @@
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+
+# Generated / runtime outputs
+project/uploads/
+project/analysis_result.json
+project/parsed_text.json
+project/parse_audit.json
+project/analysis_cache.json
+project/target_parsed.md
+project/compare_parsed*.md
+project/수정목록*.xlsx
+
+# Sensitive data files (do not publish)
+**/*.pdf
+**/*.hwpx
+**/*.hwp
+**/*.csv
+**/*.xlsx
+
+# Local/backup folders
+data/
+upload/
+uploads/
+backup/
+result/
+results/
+
+# Local tool folders
+.omo/
+.playwright-mcp/
