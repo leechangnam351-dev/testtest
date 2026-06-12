@@ -78,11 +78,9 @@
 - `pdfjs-dist`  
   - Kordoc MCP 환경 초기화 및 PDF 파싱 에러 방지를 위해 필수 요구됨.
 
-```bash
-npm install pdfjs-dist
-
-
-
+    npm install pdfjs-dist
+```bash  
+---
 
 # 주요 기능
 
