@@ -79,7 +79,9 @@
 ### 생성 파일
 
 ```text
-project/parsed_text.json
+project/target_parsed.md     기존 안내자료  파싱 결과
+project/compare_parsed.md    신규사업지침  파싱 결과
+project/parsed_text.json     분석하여 구조화된 JSON 데이터 
 ```
 
 ---
