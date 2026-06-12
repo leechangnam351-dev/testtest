@@ -79,7 +79,7 @@
   - Kordoc MCP 환경 초기화 및 PDF 파싱 에러 방지를 위해 필수 요구됨.
 
     npm install pdfjs-dist 
----
+ 
 ### 2) 환경 변수 설정 (.env)
 - API 프록시 및 모델 호출을 위해 OpenRouter를 사용합니다. 프로젝트 루트에 .env 파일을 생성하고 아래 키를 설정합니다.
   
